@@ -1,0 +1,19 @@
+# Copyright (c) 2020 Daniel Veilleux
+# SPDX-License-Identifier: LicenseRef-BSD-5-Clause-Nordic
+
+description: HC-SR04 Ultrasonic Ranging Module
+
+compatible: "hc-sr04"
+
+include: base.yaml
+
+properties:
+  trig-gpios:
+    type: phandle-array
+    description: Trigger pin
+    required: true
+
+  echo-gpios:
+    type: phandle-array
+    description: Echo pin
+    required: true
