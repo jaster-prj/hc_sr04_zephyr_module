@@ -9,19 +9,19 @@
  *       about 145us later. This pulse can't be truncated so it effectively reduces the sensor's
  *       working rate.
  */
-
-#define DT_DRV_COMPAT elecfreaks_hc_sr04
+ 
+ 
+#define DT_DRV_COMPAT hc_sr04
 
 #include <zephyr/kernel.h>
 #include <zephyr/device.h>
 #include <zephyr/drivers/gpio.h>
 #include <zephyr/drivers/sensor.h>
-#include <sensor/hc_sr04.h>
-#include <devicetree.h>
+#include <zephyr/devicetree.h>
 
 #include <zephyr/logging/log.h>
 
-LOG_MODULE_REGISTER(hc_sr04, CONFIG_HC_SR04_LOG_LEVEL);
+LOG_MODULE_REGISTER(hc_sr04, CONFIG_SENSOR_LOG_LEVEL);
 
 /* Timings defined by spec */
 #define T_TRIG_PULSE_US       11
@@ -55,13 +55,9 @@ struct hc_sr04_data {
     struct gpio_callback  echo_cb_data;
 };
 
-struct hc_sr04_cfg {
-    const char * const   trig_port;
-    const uint8_t        trig_pin;
-    const uint32_t       trig_flags;
-    const char * const   echo_port;
-    const uint8_t        echo_pin;
-    const uint32_t       echo_flags;
+struct hc_sr04_config {
+	const struct gpio_dt_spec gpio_trig;
+	const struct gpio_dt_spec gpio_echo;
 };
 
 static void input_changed(const struct device *dev, struct gpio_callback *cb, uint32_t pins)
@@ -89,34 +85,34 @@ static int hc_sr04_init(const struct device *dev)
     int err;
 
     struct hc_sr04_data      *p_data = dev->data;
-    const struct hc_sr04_cfg *p_cfg  = dev->config;
+    const struct hc_sr04_config *p_cfg  = dev->config;
 
     p_data->sensor_value.val1 = 0;
     p_data->sensor_value.val2 = 0;
 
-    p_data->trig_dev = device_get_binding(p_cfg->trig_port);
+    p_data->trig_dev = p_cfg->gpio_trig.port;
     if (!p_data->trig_dev) {
         return -ENODEV;
     }
-    p_data->echo_dev = device_get_binding(p_cfg->echo_port);
+    p_data->echo_dev = p_cfg->gpio_echo.port;
     if (!p_data->echo_dev) {
         return -ENODEV;
     }
-    err = gpio_pin_configure(p_data->trig_dev, p_cfg->trig_pin, (GPIO_OUTPUT | p_cfg->trig_flags));
+    err = gpio_pin_configure(p_data->trig_dev, p_cfg->gpio_trig.pin, (GPIO_OUTPUT | p_cfg->gpio_trig.dt_flags));
     if (err != 0) {
         return err;
     }
-    err = gpio_pin_configure(p_data->echo_dev, p_cfg->echo_pin, (GPIO_INPUT | p_cfg->echo_flags));
+    err = gpio_pin_configure(p_data->echo_dev, p_cfg->gpio_echo.pin, (GPIO_INPUT | p_cfg->gpio_echo.dt_flags));
     if (err != 0) {
         return err;
     }
     err = gpio_pin_interrupt_configure(p_data->echo_dev,
-                                       p_cfg->echo_pin,
+                                       p_cfg->gpio_echo.pin,
                                        GPIO_INT_EDGE_BOTH);
     if (err != 0) {
         return err;
     }
-    gpio_init_callback(&p_data->echo_cb_data, input_changed, BIT(p_cfg->echo_pin));
+    gpio_init_callback(&p_data->echo_cb_data, input_changed, BIT(p_cfg->gpio_echo.pin));
 
     if (m_shared_resources.ready) {
         /* Already initialized */
@@ -143,7 +139,7 @@ static int hc_sr04_sample_fetch(const struct device *dev, enum sensor_channel ch
     uint32_t count;
 
     struct hc_sr04_data      *p_data = dev->data;
-    const struct hc_sr04_cfg *p_cfg  = dev->config;
+    const struct hc_sr04_config *p_cfg  = dev->config;
 
     if (unlikely((SENSOR_CHAN_ALL != chan) && (SENSOR_CHAN_DISTANCE != chan))) {
         return -ENOTSUP;
@@ -167,9 +163,9 @@ static int hc_sr04_sample_fetch(const struct device *dev, enum sensor_channel ch
     }
 
     m_shared_resources.state = HC_SR04_STATE_RISING_EDGE;
-    gpio_pin_set(p_data->trig_dev, p_cfg->trig_pin, 1);
+    gpio_pin_set(p_data->trig_dev, p_cfg->gpio_trig.pin, 1);
     k_busy_wait(T_TRIG_PULSE_US);
-    gpio_pin_set(p_data->trig_dev, p_cfg->trig_pin, 0);
+    gpio_pin_set(p_data->trig_dev, p_cfg->gpio_trig.pin, 0);
 
     if (0 != k_sem_take(&m_shared_resources.fetch_sem, K_MSEC(T_MAX_WAIT_MS))) {
         LOG_DBG("No response from HC-SR04");
@@ -232,34 +228,47 @@ static int hc_sr04_channel_get(const struct device *dev,
     return 0;
 }
 
+#ifdef CONFIG_PM_DEVICE
+
+static int hc_sr04_pm_action(const struct device *dev, enum pm_device_action action)
+{
+	switch (action) {
+	case PM_DEVICE_ACTION_TURN_ON:
+	case PM_DEVICE_ACTION_RESUME:
+	case PM_DEVICE_ACTION_TURN_OFF:
+	case PM_DEVICE_ACTION_SUSPEND:
+		break;
+	default:
+		return -ENOTSUP;
+	}
+
+	return 0;
+}
+
+#endif
+
 static const struct sensor_driver_api hc_sr04_driver_api = {
     .sample_fetch = hc_sr04_sample_fetch,
     .channel_get  = hc_sr04_channel_get,
 };
 
-#define INST(num) DT_INST(num, elecfreaks_hc_sr04)
-
-#define HC_SR04_DEVICE(n) \
-    static const struct hc_sr04_cfg hc_sr04_cfg_##n = { \
-        .trig_port  = DT_GPIO_LABEL(INST(n), trig_gpios), \
-        .trig_pin   = DT_GPIO_PIN(INST(n),   trig_gpios), \
-        .trig_flags = DT_GPIO_FLAGS(INST(n), trig_gpios), \
-        .echo_port  = DT_GPIO_LABEL(INST(n), echo_gpios), \
-        .echo_pin   = DT_GPIO_PIN(INST(n),   echo_gpios), \
-        .echo_flags = DT_GPIO_FLAGS(INST(n), echo_gpios), \
-    }; \
-    static struct hc_sr04_data hc_sr04_data_##n; \
-    DEVICE_AND_API_INIT(hc_sr04_##n, \
-                DT_LABEL(INST(n)), \
-                hc_sr04_init, \
-                &hc_sr04_data_##n, \
-                &hc_sr04_cfg_##n, \
-                POST_KERNEL, \
-                CONFIG_SENSOR_INIT_PRIORITY, \
+#define HC_SR04_INST_DEFINE(inst)                                       \
+    static const struct hc_sr04_config hc_sr04_config_##inst = {        \
+        .gpio_trig = GPIO_DT_SPEC_INST_GET(inst, trig_gpios),           \
+        .gpio_echo = GPIO_DT_SPEC_INST_GET(inst, echo_gpios),           \
+    };                                                                  \
+    static struct hc_sr04_data hc_sr04_data_##inst;                     \
+    SENSOR_DEVICE_DT_INST_DEFINE(inst,                                  \
+                hc_sr04_init,                                           \
+                NULL,                                                   \
+                &hc_sr04_data_##inst,	                                \
+		        &hc_sr04_config_##inst,                                 \
+                POST_KERNEL,                                            \
+		        CONFIG_SENSOR_INIT_PRIORITY,                            \
                 &hc_sr04_driver_api);
 
-DT_INST_FOREACH_STATUS_OKAY(HC_SR04_DEVICE)
+// #if DT_NUM_INST_STATUS_OKAY(HC_SR04_INST_DEFINE) == 0
+// #warning "HC_SR04 driver enabled without any devices"
+// #endif
 
-#if DT_NUM_INST_STATUS_OKAY(DT_DRV_COMPAT) == 0
-#warning "HC_SR04 driver enabled without any devices"
-#endif
+DT_INST_FOREACH_STATUS_OKAY(HC_SR04_INST_DEFINE)

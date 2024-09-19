@@ -1,1 +1,11 @@
-rsource "src/hc_sr04/Kconfig"
+# HC-SR04 configuration options
+
+# Copyright (c) 2016 Intel Corporation
+# Copyright (c) 2024 Croxel Inc
+# SPDX-License-Identifier: Apache-2.0
+
+menu "Module HC-SR04"
+
+rsource "src/Kconfig"
+
+endmenu

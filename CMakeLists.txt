@@ -1,4 +1,3 @@
-target_include_directories(HC_SR04 INTERFACE include/hc_sr04)
-zephyr_include_directories(include/hc_sr04)
+set(HC_SR04_ROOT_DIR ${CMAKE_CURRENT_LIST_DIR})
 
-add_subdirectory(src/hc_sr04)
+add_subdirectory_ifdef(CONFIG_HC_SR04 src)

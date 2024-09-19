@@ -2,5 +2,6 @@ name: hc-sr04
 build:
   cmake: .
   kconfig: Kconfig
-  dts_root: .
+  settings:
+    dts_root: .
   
